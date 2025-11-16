@@ -34,6 +34,8 @@ This package uses a three-tier routing system:
 2. **Provider** (medium priority): Direct API access (OpenAI, Anthropic, etc.)
 3. **OpenRouter** (fallback): Unified API for models not available through other routes
 
+The system prioritizes routes in this order: Azure → Provider → OpenRouter.
+
 The routing is handled by a "routing judge" - an LLM that intelligently selects the best route based on:
 - Model name matching (semantic and exact)
 - Available API keys
@@ -57,6 +59,8 @@ Create a `.env` file in your project root with the following API keys:
 
 #### Optional (for direct provider access)
 
+**Note**: Direct provider access is not recommended. Only use if you have free credits available that you prefer over OpenRouter. Prefer OpenRouter otherwise.
+
 - **`OPENAI_API_KEY`**: For direct OpenAI API access
 - **`ANTHROPIC_API_KEY`**: For direct Anthropic/Claude API access
 - **`GOOGLE_API_KEY`**: For direct Google/Gemini API access
@@ -65,7 +69,7 @@ Create a `.env` file in your project root with the following API keys:
 #### Optional (for Azure)
 
 - **`AZURE_API_KEY`**: Azure OpenAI API key
-- **`AZURE_API_BASE`**: Azure OpenAI endpoint URL
+- **`AZURE_API_BASE`**: Azure OpenAI endpoint URL (e.g., `https://hms-{resource}.openai.azure.com/` for HMS endpoints)
 - **`AZURE_API_VERSION`**: Azure API version
 - **`AZURE_API_MODELS`**: Comma-separated list of available Azure models (e.g., `"gpt-5,gpt-4.1,gpt-4.1-mini"`)
 
@@ -75,15 +79,16 @@ Create a `.env` file in your project root with the following API keys:
 # OpenRouter (required for routing judge and fallback models)
 OPENROUTER_API_KEY=sk-or-v1-...
 
-# Direct provider access (optional but recommended)
+# Direct provider access (optional - only use if you have free credits available 
+# that you prefer over OpenRouter. Prefer OpenRouter otherwise.)
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 
-# Azure (optional)
-AZURE_API_KEY=...
-AZURE_API_BASE=https://your-resource.openai.azure.com/
+# Azure HMS (optional - everything except API key)
+AZURE_API_BASE=https://hms-{resource}.openai.azure.com/
 AZURE_API_VERSION=2024-02-15-preview
 AZURE_API_MODELS=gpt-5,gpt-4.1,gpt-4.1-mini
+# AZURE_API_KEY=... (add your API key separately)
 ```
 
 ## Usage
@@ -106,24 +111,63 @@ response = llm.completion(
 print(response.choices[0].message.content)
 ```
 
-### Advanced Example with Structured Output
+**Note**: All LiteLLM features (streaming, tools, structured output, etc.) are supported through the `completion()` method's `**kwargs`. See the [LiteLLM documentation](https://docs.litellm.ai/) for a complete list of available parameters.
+
+### Advanced Example with Pydantic Structured Output
 
 ```python
 from llm import LLM
+from pydantic import BaseModel
+from enum import Enum
+
+# Define a Pydantic model for structured output
+class Sentiment(str, Enum):
+    positive = "positive"
+    negative = "negative"
+    neutral = "neutral"
+
+class Analysis(BaseModel):
+    sentiment: Sentiment
+    confidence: float
+    key_points: list[str]
+    summary: str
 
 llm = LLM("claude-sonnet-4.5")
 
+# Get the JSON schema from the Pydantic model
+analysis_schema = Analysis.model_json_schema()
+
+# Create a tool schema for the LLM
+tool_schema = {
+    "type": "function",
+    "function": {
+        "name": "analyze_text",
+        "description": "Analyze text and extract structured information.",
+        "parameters": analysis_schema,
+    },
+}
+
+# Make a completion request with structured output
 response = llm.completion(
-    messages=[{"role": "user", "content": "Extract the key points from this text..."}],
+    messages=[{"role": "user", "content": "Analyze this text: 'The product is amazing!'"}],
+    tools=[tool_schema],
+    tool_choice={"type": "function", "function": {"name": "analyze_text"}},
     temperature=0.3,
-    max_tokens=500,
-    response_format={"type": "json_object"}
 )
+
+# Extract and validate the structured response
+tool_calls = response.choices[0].message.tool_calls
+if tool_calls:
+    args = tool_calls[0].function.arguments
+    analysis = Analysis.model_validate_json(args)
+    print(f"Sentiment: {analysis.sentiment}")
+    print(f"Confidence: {analysis.confidence}")
+    print(f"Key Points: {analysis.key_points}")
 ```
 
 ### Custom Routing Judge
 
-By default, the system uses `openrouter/openai/gpt-4o-mini` as the routing judge. You can specify a different model:
+By default, the system uses `openrouter/openai/gpt-4o-mini` as the routing judge (free as long as you have an OpenRouter API key). This default can be customized by passing a different model to the `routing_judge` parameter:
 
 ```python
 llm = LLM("gpt-5-2025-11-16", routing_judge="azure/gpt-4.1-mini")
@@ -150,7 +194,7 @@ The `ModelRouter` class handles intelligent routing:
    - Provider models from LiteLLM's catalog (based on available API keys)
    - OpenRouter models by querying the OpenRouter API
 
-2. **Exact matching**: First tries to find exact matches in the catalogs (prioritizing Azure → Provider → OpenRouter)
+2. **Exact matching**: First tries to find exact matches in the catalogs (prioritizing Azure → Provider → OpenRouter). Model names are normalized (lowercase, whitespace removed) for matching.
 
 3. **LLM-based routing**: If no exact match, uses a "routing judge" LLM to decide which route to use
 
@@ -208,26 +252,3 @@ Common issues:
 - **Invalid API key**: Check your environment variables
 - **Model unavailable**: The requested model may not be available on the selected route
 - **Rate limiting**: Provider may be rate limiting requests
-
-## Features
-
-- ✅ **Unified API**: Same interface for all LLM providers
-- ✅ **Intelligent Routing**: Automatically selects the best provider
-- ✅ **Fallback Support**: Gracefully falls back to OpenRouter when needed
-- ✅ **Connection Testing**: Validates models on initialization
-- ✅ **Flexible Configuration**: Supports Azure, direct providers, and OpenRouter
-- ✅ **Full LiteLLM Support**: All LiteLLM parameters and features available
-
-## Files
-
-- **`src/llm.py`**: Main `LLM` class wrapper
-- **`src/model_router.py`**: Intelligent routing logic
-- **`src/answers.py`**: Structured output schemas (if used)
-- **`src/trylitellm.py`**: Example usage and testing
-
-## Notes
-
-- The routing judge defaults to `openrouter/openai/gpt-4o-mini` but can be customized
-- Model names are normalized (lowercase, whitespace removed) for matching
-- The system prioritizes Azure → Provider → OpenRouter routes
-- All LiteLLM features (streaming, tools, structured output, etc.) are supported through the `completion()` method's `**kwargs`
