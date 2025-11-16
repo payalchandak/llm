@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "all-the-llms"
-version = "0.1.2"
+version = "0.1.3"
 description = "A unified interface for querying Large Language Models (LLMs) across multiple providers using LiteLLM and OpenRouter"
 readme = "README.md"
 requires-python = ">=3.8"
