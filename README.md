@@ -51,27 +51,24 @@ pip install litellm openrouter python-dotenv pydantic
 
 ### 2. Environment Variables
 
-Create a `.env` file in your project root with at least one of the following API keys:
+Create a `.env` file in your project root. At minimum, you need `OPENROUTER_API_KEY`:
 
-#### Required (at least one)
+#### Required
 
-- **`OPENROUTER_API_KEY`**: Required if using OpenRouter models or as the routing judge. Get your key from [OpenRouter](https://openrouter.ai/keys).
+- **`OPENROUTER_API_KEY`**: Get your key from [OpenRouter](https://openrouter.ai/keys)
 
-#### Optional (for direct provider access)
+#### Optional (Direct Provider Access)
 
-**Note**: Direct provider access is not recommended. Only use if you have free credits available that you prefer over OpenRouter. Prefer OpenRouter otherwise.
+Only use if you have free credits you prefer over OpenRouter. Otherwise, prefer OpenRouter.
 
-- **`OPENAI_API_KEY`**: For direct OpenAI API access
-- **`ANTHROPIC_API_KEY`**: For direct Anthropic/Claude API access
-- **`GOOGLE_API_KEY`**: For direct Google/Gemini API access
-- Any other provider API keys following the pattern `{PROVIDER}_API_KEY`
+- **`OPENAI_API_KEY`**, **`ANTHROPIC_API_KEY`**, **`GOOGLE_API_KEY`**, or any `{PROVIDER}_API_KEY`
 
-#### Optional (for Azure)
+#### Optional (Azure)
 
 - **`AZURE_API_KEY`**: Azure OpenAI API key
-- **`AZURE_API_BASE`**: Azure OpenAI endpoint URL 
-- **`AZURE_API_VERSION`**: Azure API version
-- **`AZURE_API_MODELS`**: Comma-separated list of deployed Azure models (e.g., `"gpt-5,gpt-4.1,gpt-4.1-mini"`)
+- **`AZURE_API_BASE`**: Endpoint URL
+- **`AZURE_API_VERSION`**: API version
+- **`AZURE_API_MODELS`**: Comma-separated list of deployed models (e.g., `"gpt-5,gpt-4.1,gpt-4.1-mini"`)
 
 ### 3. Example `.env` File
 
@@ -121,48 +118,33 @@ from pydantic import BaseModel
 from enum import Enum
 
 # Define a Pydantic model for structured output
-class Sentiment(str, Enum):
-    positive = "positive"
-    negative = "negative"
-    neutral = "neutral"
+class CoffeeQuality(str, Enum):
+    excellent = "excellent"
+    terrible = "terrible"
+    meh = "meh"
 
-class Analysis(BaseModel):
-    sentiment: Sentiment
-    confidence: float
-    key_points: list[str]
-    summary: str
+class CoffeeReview(BaseModel):
+    quality: CoffeeQuality
+    caffeine_level: int  # 1-10 scale
+    complaints: list[str]
+    verdict: str
 
 llm = LLM("claude-sonnet-4.5")
 
-# Get the JSON schema from the Pydantic model
-analysis_schema = Analysis.model_json_schema()
-
-# Create a tool schema for the LLM
-tool_schema = {
-    "type": "function",
-    "function": {
-        "name": "analyze_text",
-        "description": "Analyze text and extract structured information.",
-        "parameters": analysis_schema,
-    },
-}
-
-# Make a completion request with structured output
+# Make a completion request with structured output using response_format
 response = llm.completion(
-    messages=[{"role": "user", "content": "Analyze this text: 'The product is amazing!'"}],
-    tools=[tool_schema],
-    tool_choice={"type": "function", "function": {"name": "analyze_text"}},
+    messages=[{"role": "user", "content": "Review this coffee: 'It tastes like someone dissolved a tire in hot water and called it a day.'"}],
+    response_format=CoffeeReview,
     temperature=0.3,
 )
 
 # Extract and validate the structured response
-tool_calls = response.choices[0].message.tool_calls
-if tool_calls:
-    args = tool_calls[0].function.arguments
-    analysis = Analysis.model_validate_json(args)
-    print(f"Sentiment: {analysis.sentiment}")
-    print(f"Confidence: {analysis.confidence}")
-    print(f"Key Points: {analysis.key_points}")
+content = response.choices[0].message.content
+review = CoffeeReview.model_validate_json(content)
+print(f"Quality: {review.quality}")
+print(f"Caffeine Level: {review.caffeine_level}/10")
+print(f"Complaints: {', '.join(review.complaints)}")
+print(f"Verdict: {review.verdict}")
 ```
 
 ### Custom Routing Judge
