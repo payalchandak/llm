@@ -1,4 +1,4 @@
-# all-the-llms
+# all-the-llms: An Universal LLM Interface
 
 A unified interface for querying Large Language Models (LLMs) across multiple providers using LiteLLM and OpenRouter. This package provides intelligent model routing that automatically selects the best provider for each model request.
 
